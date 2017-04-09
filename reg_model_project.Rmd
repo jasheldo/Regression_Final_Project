@@ -1,0 +1,280 @@
+---
+title: "Modeling and prediction for movies"
+author: "James Sheldon"
+date: "April 10, 2017"
+output: 
+  html_document: 
+    fig_height: 4
+    highlight: pygments
+    theme: spacelab
+---
+
+## Setup
+
+### Load packages
+
+```{r load-packages, message = FALSE}
+library(tidyverse)
+library(GGally)
+```
+
+### Load data
+
+```{r load-data}
+load("movies.Rdata")
+```
+
+
+
+* * *
+
+## Part 1: Data
+
+The intro to the [codebook](https://d18ky98rnyall9.cloudfront.net/_73393031e98b997cf2445132f89606a1_movies_codebook.html?Expires=1491782400&Signature=Ktyh7Iw1y6RxnOxH8--VYDeC~xxZtzS1yb4fJPi9qfIveiIIoBNsv~S23d2x8OTZRAl4yCLD3g99p~LCyYkDrZ711OP9CDLYbfBbhj0EYmeurdzuhZRLRCyaZMBgZQQuH-7sZ9A0H7Uj4EvY3mhlFYWeY77HtqeZHIc0PJAdiIw_&Key-Pair-Id=APKAJLTNE6QMUY6HBC5A) says it best:
+
+> The data set is comprised of 651 randomly sampled movies produced and released before 2016.
+>
+> Some of these variables are only there for informational purposes and do not make any sense to include in a statistical analysis. It is up to you to decide which variables are meaningful and which should be omitted. For example information in the the actor1 through actor5 variables was used to determine whether the movie casts an actor or actress who won a best actor or actress Oscar.
+>
+> You might also choose to omit certain observations or restructure some of the variables to make them suitable for answering your research questions.
+>
+> When you are fitting a model you should also be careful about collinearity, as some of these variables may be dependent on each other.
+
+Because the data is observational in nature, no causal statements can be made from it. However, since it is observational and definitely less than 10% of all movies made in the time period being considered, the conclusions made here can reasonably be extended to the population as a whole.
+
+That said, it is worth noting there is a degree of risk using this data to extend to the general population. There is selection risk in the data. The people who filled in the data are the ones that specifically went to the website because they were compelled to do so. No everyone in the population has access to the Internet nor are interested in submitting this information.
+
+### User Defined Functions
+
+```{r user_functions}
+comma <- function(x) {
+    format(x, digits = 2, scientific = FALSE, big.mark = ",")
+}
+```
+
+* * *
+
+## Part 2: Research question
+
+In order to establish a research question we need to first revisit the original request. Based on the project outline:
+
+> She is interested in learning what attributes make a movie popular. She is also interested in learning something new about movies.
+
+Based on that we need to figure out 
+
+1. how we're going to define and quantify "popular" and 
+2. what fun stuff we can express about movies.
+
+2 above will probably be incidental from 1 so we won't spend much time thinking about it.
+
+Our question will be:
+
+**Is there a correlation between popularity of a movie and more than one variable that is statistically significant?**
+
+The data include three numerical variables that are related to popularity: `imdb_rating`, `critic_score` and `audience_score`. It would make sense to think of an `imdb_rating` not being independent of the `audience_score` since it's the general public that provides the metric. In fact, the correlation between these two variables is `r round(cor(movies$imdb_rating, movies$audience_score),4)`. One will certainly be a great predictor of another and using both as explanatory variables will introduce co-linearity due to their high correlation.
+
+To decide which of these three variables we'll be using as our response variable, let's take a look at the below plots which outline scatter and density plots of the three aforementioned variables as well as their correlations.
+
+```{r}
+ggpairs(movies, columns = c("critics_score", "audience_score", "imdb_rating"), title = "imdb_rating vs critic_score vs audience_score")
+```
+
+As you can see, all three are highly correlated and all three showing some degree of linear relationship. Because of the high degree of correlation between `audience_score` and `imdb_rating`, it's clear they are co-linear so they both shouldn't be used as predictors.
+
+The above graph shows the correlation factors relative for the three numerical variables and also outlines the linearity of `imdb_rating` and `critics_score` to `audience_score`. For this project then it makes sense to use `audience_score` as the response variable and use a selection of the others to determine an effective predictive linear model.
+
+Now, let's talk about the variables we will be excluding from our analysis.
+
+### Excluded Variables
+
+`title` is going to be excluded. Because each observation contains a unique title, using this variable will cause a perfect fit and offer no predictive value.
+
+`title_type`, as shown below, does display some strong correlation relative to the other chosen variables; however, it shows some strong left skew toward documentary type films. As such, it will not offer strong value across the board in our model.
+
+```{r}
+ggpairs(movies, columns = c("critics_score", "audience_score", "imdb_rating"), mapping = ggplot2::aes(colour = title_type))
+```
+
+`genre` also suffers from left skewedness which will impact its interplay with other variables.
+
+```{r}
+ggpairs(movies, columns = c("critics_score", "audience_score", "imdb_rating"), mapping = ggplot2::aes(colour = genre))
+```
+
+`runtime`, unless you're a very impatient person, should conceptually have no impact on movie enjoyment and will be excluded.
+
+`studio` will be left out purely because it's doesn't seem there should be any strong correlation between the studio producing a movie and the viewership enjoyment of it. That could be a terrible assumption and it will be explored later but for now it's going to be excluded on that basis.
+
+`thtr_rel_year` to `dvd_rel_day`. While there is seasonality regarding movie revenue (e.g. revenue definitely follows the holiday trends as volume increases during that time, etc.), actual enjoyment of movies based on seasonality would be purely coincidental and these variables will therefore be excluded from modeling.
+
+`best_pic_nom` to `best_dir_win`. While there may be some correlation between any of these variables and enjoyment of a movie, there are so few observations in the data that we cannot guarantee statistical significance and they will therefore be excluded.
+
+`director` to `rt_url`. All of these have nothing to do with movie enjoyment and will therefore be excluded.
+
+* * *
+
+## Part 3: Exploratory data analysis
+
+Now that we've taken the time to list the variables we'll be excluding, let's take a look at the remaining variables and how they fit in with the rest of the picture.
+
+One thing you'll notice in the below code is a removal of all observations wt `imdb_rating` $< 4.0$. This will be further explained in the model diagnostics below; however, this was done because removal of those values gave a slightly better predictive model with one less variable.
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+movies2 <- movies %>% filter(imdb_rating > 3.9) %>% 
+    select(-(title:runtime),-(studio:dvd_rel_day),-(best_pic_nom:best_dir_win),-(director:rt_url))
+ggpairs(movies2, columns = c("imdb_rating", "imdb_num_votes", "mpaa_rating", "audience_score"))
+```
+
+Based on the above graph we see `imdb_num_votes` is highly skewed right and has a very low correlation with `audience_score`. As such, we will also exclude `imdb_num_votes` from our predictive model. `mpaa_rating` looks promising though so we'll keep it for consideration.
+
+```{r warning=FALSE, error=FALSE, message=FALSE}
+ggpairs(movies2, columns = c("critics_rating", "critics_score", "audience_rating", "top200_box", "audience_score"))
+```
+
+As we can see from the above graphs, there is a linear relationship between `critics_score` and `audience_score`. Further, based on the density plot and high correlation to `audience_rating`, this variable looks like it will offer some solid value to our predictive model.
+
+The distributions of `critics_rating` and `audience_rating` also suggest they will offer value in a model so they will also be included.
+
+Finally, `top200_box` does not show enough observations in one of its two levels so we will exclude that variable from further consideration.
+
+* * *
+
+## Part 4: Modeling
+
+Using the variables we discussed above, it's time to fit a model. We will be applying a linear model to our subset of the movies table and once that's done we will perform both a forward and backward method to maximize the adjusted $R^2$ value for the model.
+
+```{r}
+model <- lm(audience_score ~ ., data = movies2)
+model <- step(model, trace = FALSE, direction = "both")
+summary(model)
+```
+
+With three variables (`imdb_rating`, `critics_score` and `audience_rating`), we are able to explain 88.27% of the variation in the data with 628 degrees of freedom and an F-statistic of 2,372 with an overall $p$-value of 2.2e-16.
+
+This model looks like a great fit to our data, leaving only 10.73% of the variability unexplained. We also have two variables with strong statistical significance: `imdb_rating` and `audience_rating`. This means we can reject $H_0$ which stated there are no variables with strong statistical significance to `audience_score` and we can say with 99% confidence that all else being equal, `imdb_rating` and `audience_rating` provide a strong predictive measure for `audience_score`.
+
+In context, the intercept is meaningless. It says, all else in the model being equal, the default `audiance_score` is -9.87. It's not possible to give a negative score.
+
+The rest of the variables are, in context, meaningful. For example, the `imdb_rating` coefficient states that in the model, with all else being equal, for every unit change in `imdb_rating`, the `audience_rating` increases by 9.06 points. An identical explanation exists for `critics_score` and `audience_rating`.
+
+But before we get too excited, let's take a look at the residuals.
+
+```{r error=FALSE, message=FALSE, warning=FALSE}
+ggnostic(model, mapping = ggplot2::aes(colour=audience_rating))
+```
+
+This plot goes well beyond the scope of the course but since the package was loaded it was worth giving it a go. Relative to this course only the first row of plots is relevant. It shows the residuals are distributed nearly normally which is to be expected.
+
+* * * 
+
+An interesting sidebar in the above graph is the cooksd value for `imdb_rating`. In previous modelling scenarios, scores below 3.9 were heavily skewing results. As a result, `imdb_scores` $< 3.9$ were removed from the data and the model was refit. That had the result of taking `critics_score` out of the model at a slightly higher $R^2$ value. As a result those three scores were removed and the model re-run to be what is in this report.
+
+```{r}
+model$anova
+```
+
+Stepping through the variables we saw model improvement by removing `critics_rating`, `mpaa_rating`, `top200_box` and `imdb_num_votes`. It was explained earlier that we would be removing these variables so it's only fitting (see what I did there?) to see them in the ANOVA table.
+
+```{r}
+ggplot(data = model, mapping = aes(x = model$residuals)) + geom_histogram(bins = 10)
+```
+
+The residuals look nearly normally distributed and centered near 0.
+
+```{r}
+ggplot(data = model, mapping = aes(x = names(model$residuals), y = model$residuals)) + geom_jitter() + labs(x = "Index", y = "Residual") + ggtitle("Residual Plot") + scale_x_discrete(breaks = c("100", "200", "300", "400", "500", "600")) + geom_hline(yintercept = 0)
+```
+
+A plot of the residuals shows a random distribution around 0 so it appears our model passes the sniff test.
+
+* * *
+
+## Part 5: Prediction
+
+2016 gave us some really great movies. I'm actually going to pick a few of them and predict their `audience_score`.
+
+**[Rogue One: A Star Wars Story](https://www.rottentomatoes.com/m/rogue_one_a_star_wars_story)**
+
+`imdb_rating`: 8.0  
+`critics_score`: 85  
+`audience_rating`: Upright  
+**Actual `audience_score`: 88%**  
+
+```{r}
+predict(model, newdata = data.frame(imdb_rating = 8.0, audience_rating = "Upright"), interval = "prediction")
+```
+
+For Rogue One we didn't do too badly. The model predicted an `audience_score` of 85.45% and the actual score was 88%. The lower and upper values are the 95% confidence interval for the score, meaning we are 95% confident that with an `imdb_rating` of 8.0, a `critics_score` of 85 and `audience_rating` of Upright, that the value of the `audience_score` will be between 71.79% and 99.11%.
+
+**[Captain America: Civil War](https://www.rottentomatoes.com/m/captain_america_civil_war)**
+
+`imdb_rating`: 7.9  
+`critics_score`: 90  
+`audience_rating`: Upright  
+**Actual `audience_score`: 89%**  
+
+```{r}
+predict(model, newdata = data.frame(imdb_rating = 7.9, audience_rating = "Upright"), interval = "prediction")
+```
+
+**[Moana](https://www.rottentomatoes.com/m/moana_2016)**
+
+`imdb_rating`: 7.7  
+`critics_score`: 95  
+`audience_rating`: Upright  
+**Actual `audience_score`: 89%**  
+
+```{r}
+predict(model, newdata = data.frame(imdb_rating = 7.7, audience_rating = "Upright"), interval = "prediction")
+```
+
+**[Batman vs. Superman](https://www.rottentomatoes.com/m/batman_v_superman_dawn_of_justice)**
+
+`imdb_rating`: 6.7  
+`critics_score`: 27  
+`audience_rating`: Upright  
+**Actual `audience_score`: 63%**  
+
+```{r}
+predict(model, newdata = data.frame(imdb_rating = 6.7, audience_rating = "Upright"), interval = "prediction")
+```
+
+**[Ghostbusters](https://www.rottentomatoes.com/m/ghostbusters_2016)**
+
+`imdb_rating`: 5.4  
+`critics_score`: 73  
+`audience_rating`: Spilled  
+**Actual `audience_score`: 53%**  
+
+```{r}
+predict(model, newdata = data.frame(imdb_rating = 5.4, audience_rating = "Spilled"), interval = "prediction")
+```
+
+**[Star Trek Beyond](https://www.rottentomatoes.com/m/star_trek_beyond)**
+
+`imdb_rating`: 7.1  
+`critics_score`: 84  
+`audience_rating`: Upright  
+**Actual `audience_score`: 81%**  
+
+```{r}
+predict(model, newdata = data.frame(imdb_rating = 7.1, audience_rating = "Upright"), interval = "prediction")
+```
+
+* * *
+
+## Part 6: Conclusion
+
+The `movies` data set provides a number of categorical and numeric variables for movies in a wide time range. Given the proper elements we can use that information to construct a predictive model for movies that do not exist in our data set. These predictions can help us project many important characteristics of a movie such as its financial success.
+
+Putting together a predictive model requires many different elements to align. From taking the time to determine what it is you wish to predict to choosing the correct variables as predictors takes a keen eye and sometimes the discretion to conclude that a linear model may not be the right way to go. In our instance we were able to predict almost 90% of the variability in the data. While not amazing, it still got us some decent results.
+
+* * *
+
+## Part 7: Addendum
+
+### Session Info
+
+```{r session_info}
+sessionInfo()
+```
