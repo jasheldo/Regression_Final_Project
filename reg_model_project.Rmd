@@ -201,10 +201,10 @@ A plot of the residuals shows a random distribution around 0 so it appears our m
 **Actual `audience_score`: 88%**  
 
 ```{r}
-predict(model, newdata = data.frame(imdb_rating = 8.0, audience_rating = "Upright"), interval = "prediction")
+(p1 <- predict(model, newdata = data.frame(imdb_rating = 8.0, audience_rating = "Upright"), interval = "prediction"))
 ```
 
-For Rogue One we didn't do too badly. The model predicted an `audience_score` of 85.45% and the actual score was 88%. The lower and upper values are the 95% confidence interval for the score, meaning we are 95% confident that with an `imdb_rating` of 8.0, a `critics_score` of 85 and `audience_rating` of Upright, that the value of the `audience_score` will be between 71.79% and 99.11%.
+For Rogue One we didn't do too badly. The model predicted an `audience_score` of `r paste0(comma(p1[1,1]),"%")` and the actual score was 88%. The lower and upper values are the 95% confidence interval for the score, meaning we are 95% confident that with an `imdb_rating` of 8.0, a `critics_score` of 85 and `audience_rating` of Upright, that the value of the `audience_score` will be between `r paste0(comma(p1[1,2]),"%")` and `r paste0(comma(p1[1,3]),"%")`.
 
 **[Captain America: Civil War](https://www.rottentomatoes.com/m/captain_america_civil_war)**
 
