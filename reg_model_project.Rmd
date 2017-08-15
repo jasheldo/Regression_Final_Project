@@ -187,6 +187,12 @@ ggplot(data = model, mapping = aes(x = names(model$residuals), y = model$residua
 
 A plot of the residuals shows a random distribution around 0 so it appears our model passes the sniff test.
 
+```{r qqplot}
+qqnorm(model$residuals)
+```
+
+You can also see that the residuals follow closely to the qqline.
+
 * * *
 
 ## Part 5: Prediction
